@@ -15,6 +15,7 @@ llm = [
 
 [project.scripts]
 jev-study = "jev_study.cli:main"
+evaluate-jev = "jev_study.evaluate:main"
 
 [dependency-groups]
 dev = [
