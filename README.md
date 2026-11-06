@@ -1,6 +1,6 @@
 # jev-study
 
-Estudo técnico do Jev, primeiro modelo System One da [TypeSafe](https://typesafe.ai/), contra um baseline de LLM com saída estruturada. O repositório é de Gabriel, desenvolvedor de IA e automação. Este PR só deixa o aparato de execução: contrato tipado, clientes, conjunto sintético pequeno e registro cru. Não há resultado de modelo aqui.
+Estudo técnico do Jev, primeiro modelo System One da [TypeSafe](https://typesafe.ai/), contra um baseline de LLM com saída estruturada. O repositório é de Gabriel, desenvolvedor de IA e automação. Há o aparato de execução (contrato tipado, clientes, runner e registro cru) e o gabarito sintético v1 em `data/eval/decisions.v1.jsonl`. Não há resultado de modelo aqui.
 
 Jev não é um LLM de chat. O cliente manda um estado não estruturado e perguntas tipadas e recebe decisões com probabilidade. A chamada publicada é `POST /v1/systemone` (`jev-latest` ou um id versionado, hoje `jev-1.14.0`). Referências: [System One](https://docs.typesafe.ai/concepts/system-one), [API](https://docs.typesafe.ai/api/system-one) e [Models](https://docs.typesafe.ai/models).
 
@@ -16,7 +16,7 @@ Os dois sistemas veem o mesmo `state`, as mesmas `questions` e o mesmo gabarito.
 
 ## Hipótese
 
-A documentação da TypeSafe descreve o System One como um modelo de decisão calibrada: as probabilidades são treinadas para refletir incerteza, e a calibração vale para grupos de previsões, não como garantia de um caso. Neste repositório isso é hipótese do PR3, quando houver decisões reais. Não é premissa e não é resultado.
+A documentação da TypeSafe descreve o System One como um modelo de decisão calibrada: as probabilidades são treinadas para refletir incerteza, e a calibração vale para grupos de previsões, não como garantia de um caso. Neste repositório isso é hipótese do study-PR3, quando houver decisões reais. Não é premissa e não é resultado. Alegação de marketing da TypeSafe não entra como número deste estudo.
 
 Velocidade, custo relativo e "zero alucinações" só entram num relatório depois que um experimento daqui medir esses pontos. Até lá ficam fora da metodologia. A tarifa de lista do Jev 1.14 (USD 0,042 por milhão de tokens de entrada; saída publicada como gratuita) aparece só como parâmetro para estimar custo a partir de `usage`. A fonte é a página Models. Não é medição deste estudo.
 
@@ -33,22 +33,61 @@ Primitivas, no formato da API:
 | Noul | P(sim), de 0 a 1 | a própria probabilidade; não há campo `confidence`, e o código não inventa um |
 | Box | arestas normalizadas | `confidence` se a API mandar; sem isso, os dois campos ficam nulos |
 
-Concordância, a implementar no PR3: Choice por igualdade da chave; Score pelo nível inteiro mais próximo; Noul com limiar 0,5 (probabilidade maior ou igual a 0,5 conta como sim). Calibração, no mesmo PR: confiança declarada contra acerto, para os tipos que publicam `confidence`. Para Noul a curva usa a probabilidade, porque é o número que o modelo declara.
+Concordância, a implementar no study-PR3: Choice por igualdade da chave; Score pelo nível inteiro mais próximo; Noul com limiar 0,5 (probabilidade maior ou igual a 0,5 conta como sim). Calibração, no mesmo PR: confiança declarada contra acerto, para os tipos que publicam `confidence`. Para Noul a curva usa a probabilidade, porque é o número que o modelo declara.
 
 Validade de schema: o JSON parseia no modelo compartilhado, os números caem nas faixas publicadas e o tipo da resposta é o tipo da pergunta. O cliente Jev ainda exige `usage`, porque a API o marca como obrigatório. Campo extra na resposta não invalida o contrato.
 
-As tarefas deste PR são sintéticas, escritas no repositório, em português, com chaves em inglês. Não há dado de cliente. Box depende de imagem; o PR1 não manda asset nem o header `TypeSafe-Danger-Zone-Images` nas tarefas. Uma pergunta Box fica no conjunto só para o runner registrar o skip e não chamar o backend.
+As tarefas são sintéticas, escritas no repositório, em português, com chaves em inglês. Não há dado de cliente. Box depende de imagem. O placeholder de quinze itens guarda uma pergunta Box só para o runner registrar o skip, sem asset e sem o header `TypeSafe-Danger-Zone-Images`. O gabarito v1 não inclui Box.
 
 O baseline de LLM recebe o mesmo JSON de request no user message e devolve o mesmo schema. O prompt de sistema não contém gabarito. Ele existe porque um LLM de chat precisa de instrução; o Jev não recebe esse prompt. Essa diferença fica explícita para o relatório não tratá-la como detalhe.
 
-## O que este PR entrega
+## O que o repositório entrega
 
 - Projeto Python 3.11+, `uv`, Ruff e pytest. A CI roda lint e teste sem chave da TypeSafe e sem chave de LLM.
 - `JevHttpBackend`: `POST /v1/systemone` pela stdlib. Não importa o SDK da TypeSafe. Redirect é recusado para o header `Authorization` não seguir para outro host.
 - `LlmStructuredBackend`: mesma resposta tipada. O pacote `openai` só é importado na chamada ao vivo; os testes injetam um completer.
 - `FakeBackend` e um eco de gabarito para a CI e para o comando local. O eco usa confiança 1 e não preenche `usage`. Não é previsão.
-- Quinze tarefas sintéticas: roteamento Choice, tom, Score, Noul e uma Box pulada.
+- Quinze tarefas sintéticas de placeholder: roteamento Choice, tom, Score, Noul e uma Box pulada. O comando local roda este conjunto, não o v1.
+- Gabarito v1 em `data/eval/decisions.v1.jsonl`: 45 tarefas sintéticas, 15 de cada tipo Choice, Score e Noul. O loader recusa linha malformada. Seis itens trazem `low_confidence` como desenho do texto, não como saída de modelo.
 - Runner que grava backend, modelo pedido, modelo que respondeu, decisão, confiança, probabilidade, latência, tokens e custo estimado quando a tarifa e o `usage` existem.
+
+## Dataset de avaliação
+
+O arquivo `data/eval/decisions.v1.jsonl` é o gabarito do study-PR2. São 45 linhas: 15 Choice, 15 Score e 15 Noul. Os estados são textos sintéticos em português. As chaves das opções ficam em inglês, no formato do `POST /v1/systemone`. Não há pessoa real, dado de cliente, conteúdo de negócio privado nem imagem. Box fica de fora deste arquivo.
+
+Cada linha traz:
+
+| Campo | Papel |
+| --- | --- |
+| `schema_version` | `1`. Outra versão o loader recusa. |
+| `id` | Identificador estável da tarefa. |
+| `category` | `choice`, `score` ou `noul`. As perguntas da linha são desse tipo. |
+| `state` | Texto de entrada, o mesmo material que os dois backends veriam. |
+| `questions` | Perguntas no schema do adapter. |
+| `expected` | Gabarito. Choice guarda a chave; Score guarda o índice inteiro da rubrica (`score_level`); Noul guarda sim ou não, nunca uma probabilidade. |
+| `notes` | Justificativa do gabarito. No schema é opcional; neste arquivo toda linha tem nota. |
+| `expectation` | `clear` ou `low_confidence`. |
+
+`low_confidence` marca um texto escrito para admitir outra leitura. Há dois itens desses em cada tipo. O valor em `expected` é a leitura preferida, e a nota diz qual é a leitura concorrente. O campo foi preenchido junto com o item. Não é confiança declarada por um modelo, não é probabilidade, e o request que sai para o adapter não leva esse campo.
+
+O loader é `load_eval_decisions`, em `jev_study.dataset`. Ele recusa JSON inválido, campo fora do schema, categoria diferente do tipo da pergunta, gabarito incompatível com a rubrica, id repetido, estado repetido com as mesmas perguntas e linha vazia.
+
+Inventário, sem chamar modelo:
+
+```bash
+uv run python - <<'PY'
+from jev_study.dataset import load_eval_decisions
+
+rows = load_eval_decisions()
+print(f"{len(rows)} itens")
+for row in rows:
+    print(f"{row.id}  {row.category}  {row.expectation}")
+PY
+```
+
+`uv run jev-study` continua no placeholder de quinze itens. Esse comando não lê o v1, e o JSON que imprime é eco de gabarito, não avaliação.
+
+Nada no arquivo confirma alegação pública de calibração, velocidade, custo ou ausência de alucinação. Esses pontos seguem como hipótese do study-PR3 e matéria do study-PR4.
 
 ## Como rodar
 
@@ -60,7 +99,7 @@ uv run pytest
 uv run jev-study
 ```
 
-`uv run jev-study` imprime o registro do eco de gabarito. Confiança 1 e custo nulo nesse JSON são o placeholder, não uma avaliação do Jev.
+`uv run jev-study` imprime o registro do eco de gabarito do placeholder de quinze itens. Confiança 1 e custo nulo nesse JSON são o placeholder, não uma avaliação do Jev e não são números do gabarito v1.
 
 Chamada ao vivo, fora da CI, com a chave só no ambiente:
 
@@ -105,10 +144,9 @@ Cada linha é um objeto JSON com: `task_id`, `source`, `backend`, `requested_mod
 
 ## Roadmap
 
-- PR2: dataset completo e gabarito, ainda só com tarefa pública ou sintética. Box entra se houver imagem que possa ser versionada.
-- PR3: métricas. Validade de schema, concordância com o gabarito e calibração da confiança declarada.
-- PR4: experimentos nos dois backends e relatório. Números de qualidade, latência e custo só depois dessa rodada, com a configuração e o id do modelo gravados.
+- study-PR3: harness de avaliação e métricas de calibração. Validade de schema, concordância com o gabarito e calibração da confiança declarada. A marca `low_confidence` entra como desenho do item; a curva em si não é calculada aqui.
+- study-PR4: experimentos ao vivo nos dois backends e o relatório. Números de qualidade, latência e custo só depois dessa rodada, com a configuração e o id do modelo gravados.
 
-## Fora deste PR
+## Ainda fora
 
-Não há acurácia, curva de calibração, latência de produção nem custo medido. O eco local não substitui essas rodadas. Imagem e o header de visão ficam de fora das tarefas, embora o cliente HTTP envie o header se alguém passar `assets` ou uma pergunta Box.
+Não há acurácia, curva de calibração, latência de produção nem custo medido. O eco local não substitui essas rodadas. Imagem e o header de visão ficam de fora do gabarito v1, embora o cliente HTTP envie o header se alguém passar `assets` ou uma pergunta Box.
