@@ -1,3 +1,3 @@
-"""Aparato do estudo Jev e o gabarito sintético v1. Ainda não guarda resultado de modelo."""
+"""Aparato do estudo Jev, o gabarito v1 e o harness de avaliação. Sem resultado de modelo."""
 
 __version__ = "0.1.0"

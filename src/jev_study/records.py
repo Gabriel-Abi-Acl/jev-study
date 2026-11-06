@@ -1,4 +1,4 @@
-"""Campos crus de uma decisão. Métrica de concordância e calibração ficam para o PR3.
+"""Campos crus de uma decisão. Concordância e calibração ficam em metrics.py.
 
 confidence é só o campo que a API declara. Noul não tem esse campo, e este módulo
 não fabrica um a partir da probabilidade. A probabilidade de score é a do nível

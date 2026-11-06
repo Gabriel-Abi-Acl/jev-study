@@ -1,6 +1,6 @@
 # jev-study
 
-Estudo técnico do Jev, primeiro modelo System One da [TypeSafe](https://typesafe.ai/), contra um baseline de LLM com saída estruturada. O repositório é de Gabriel, desenvolvedor de IA e automação. Há o aparato de execução (contrato tipado, clientes, runner e registro cru) e o gabarito sintético v1 em `data/eval/decisions.v1.jsonl`. Não há resultado de modelo aqui.
+Estudo técnico do Jev, primeiro modelo System One da [TypeSafe](https://typesafe.ai/), contra um baseline de LLM com saída estruturada. O repositório é de Gabriel, desenvolvedor de IA e automação. Há o aparato de execução (contrato tipado, clientes, runner e registro cru), o gabarito sintético v1 em `data/eval/decisions.v1.jsonl` e o harness que compara cada decisão ao rótulo. Não há resultado de modelo aqui.
 
 Jev não é um LLM de chat. O cliente manda um estado não estruturado e perguntas tipadas e recebe decisões com probabilidade. A chamada publicada é `POST /v1/systemone` (`jev-latest` ou um id versionado, hoje `jev-1.14.0`). Referências: [System One](https://docs.typesafe.ai/concepts/system-one), [API](https://docs.typesafe.ai/api/system-one) e [Models](https://docs.typesafe.ai/models).
 
@@ -16,11 +16,11 @@ Os dois sistemas veem o mesmo `state`, as mesmas `questions` e o mesmo gabarito.
 
 ## Hipótese
 
-A documentação da TypeSafe descreve o System One como um modelo de decisão calibrada: as probabilidades são treinadas para refletir incerteza, e a calibração vale para grupos de previsões, não como garantia de um caso. Neste repositório isso é hipótese do study-PR3, quando houver decisões reais. Não é premissa e não é resultado. Alegação de marketing da TypeSafe não entra como número deste estudo.
+A documentação da TypeSafe descreve o System One como um modelo de decisão calibrada: as probabilidades são treinadas para refletir incerteza, e a calibração vale para grupos de previsões, não como garantia de um caso. O harness calcula concordância e uma curva de confiabilidade em cima das decisões que receber. Sem a rodada ao vivo, essa descrição continua hipótese. Não é premissa e não é resultado. Alegação de marketing da TypeSafe não entra como número deste estudo.
 
 Velocidade, custo relativo e "zero alucinações" só entram num relatório depois que um experimento daqui medir esses pontos. Até lá ficam fora da metodologia. A tarifa de lista do Jev 1.14 (USD 0,042 por milhão de tokens de entrada; saída publicada como gratuita) aparece só como parâmetro para estimar custo a partir de `usage`. A fonte é a página Models. Não é medição deste estudo.
 
-## Metodologia planejada
+## Metodologia
 
 Unidade de análise: uma pergunta sobre um estado. Cada linha do registro é uma pergunta. Várias perguntas na mesma request compartilham latência e custo; o campo `cost_scope` vale `request` para a soma não contar a mesma chamada duas vezes.
 
@@ -33,7 +33,9 @@ Primitivas, no formato da API:
 | Noul | P(sim), de 0 a 1 | a própria probabilidade; não há campo `confidence`, e o código não inventa um |
 | Box | arestas normalizadas | `confidence` se a API mandar; sem isso, os dois campos ficam nulos |
 
-Concordância, a implementar no study-PR3: Choice por igualdade da chave; Score pelo nível inteiro mais próximo; Noul com limiar 0,5 (probabilidade maior ou igual a 0,5 conta como sim). Calibração, no mesmo PR: confiança declarada contra acerto, para os tipos que publicam `confidence`. Para Noul a curva usa a probabilidade, porque é o número que o modelo declara.
+Concordância, no harness: Choice por igualdade da chave; Score pelo nível inteiro mais próximo; Noul com limiar 0,5 (probabilidade maior ou igual a 0,5 conta como sim). Calibração: confiança declarada contra acerto, para os tipos que publicam `confidence`. Para Noul a curva usa a probabilidade declarada contra o rótulo sim, porque é o número que o modelo declara e esse tipo não tem campo `confidence`. Resposta de outro tipo é inválida: o acerto fica nulo e o número não vira score. Erro de transporte também deixa o acerto nulo, em vez de inventar uma decisão.
+
+A fatia `low_confidence` separa os itens escritos com leitura concorrente. O harness compara a média de `confidence` dessa fatia com a dos itens `clear`, só em respostas válidas que trouxeram o campo. Não preenche confiança quando o backend não declarou, e não trata o eco de gabarito como se ele tivesse reconhecido a ambiguidade.
 
 Validade de schema: o JSON parseia no modelo compartilhado, os números caem nas faixas publicadas e o tipo da resposta é o tipo da pergunta. O cliente Jev ainda exige `usage`, porque a API o marca como obrigatório. Campo extra na resposta não invalida o contrato.
 
@@ -47,9 +49,10 @@ O baseline de LLM recebe o mesmo JSON de request no user message e devolve o mes
 - `JevHttpBackend`: `POST /v1/systemone` pela stdlib. Não importa o SDK da TypeSafe. Redirect é recusado para o header `Authorization` não seguir para outro host.
 - `LlmStructuredBackend`: mesma resposta tipada. O pacote `openai` só é importado na chamada ao vivo; os testes injetam um completer.
 - `FakeBackend` e um eco de gabarito para a CI e para o comando local. O eco usa confiança 1 e não preenche `usage`. Não é previsão.
-- Quinze tarefas sintéticas de placeholder: roteamento Choice, tom, Score, Noul e uma Box pulada. O comando local roda este conjunto, não o v1.
+- Quinze tarefas sintéticas de placeholder: roteamento Choice, tom, Score, Noul e uma Box pulada. `uv run jev-study` roda este conjunto, não o v1.
 - Gabarito v1 em `data/eval/decisions.v1.jsonl`: 45 tarefas sintéticas, 15 de cada tipo Choice, Score e Noul. O loader recusa linha malformada. Seis itens trazem `low_confidence` como desenho do texto, não como saída de modelo.
 - Runner que grava backend, modelo pedido, modelo que respondeu, decisão, confiança, probabilidade, latência, tokens e custo estimado quando a tarifa e o `usage` existem.
+- `evaluate-jev` lê o gabarito v1 e roda o eco ou os adapters. Cada item traz backend, tipo, decisão prevista, gabarito, casamento, confiança, probabilidade, latência, tokens e custo estimado quando o backend os entrega. O modo `fake` não abre rede. O JSON também traz concordância, faixas de confiabilidade e a fatia `low_confidence`. Esse JSON não é o relatório do estudo.
 
 ## Dataset de avaliação
 
@@ -87,7 +90,7 @@ PY
 
 `uv run jev-study` continua no placeholder de quinze itens. Esse comando não lê o v1, e o JSON que imprime é eco de gabarito, não avaliação.
 
-Nada no arquivo confirma alegação pública de calibração, velocidade, custo ou ausência de alucinação. Esses pontos seguem como hipótese do study-PR3 e matéria do study-PR4.
+Nada no arquivo confirma alegação pública de calibração, velocidade, custo ou ausência de alucinação. O harness só mede isso quando um backend devolve decisões. Publicar os números é matéria do study-PR4.
 
 ## Como rodar
 
@@ -100,6 +103,26 @@ uv run jev-study
 ```
 
 `uv run jev-study` imprime o registro do eco de gabarito do placeholder de quinze itens. Confiança 1 e custo nulo nesse JSON são o placeholder, não uma avaliação do Jev e não são números do gabarito v1.
+
+O harness do v1, também offline:
+
+```bash
+uv run evaluate-jev
+uv run python -m jev_study.evaluate --backend fake
+```
+
+Sem argumento, `--backend` vale `fake`: o comando percorre as 45 linhas com o eco de gabarito e imprime `items` e `metrics`. Confiança alta e custo nulo nesse modo são o eco, não uma medição do Jev nem do baseline. Não gravar essa saída no repositório como relatório.
+
+Os dois adapters ao vivo, fora da CI:
+
+```bash
+export TYPESAFE_API_KEY="..."
+export LLM_API_KEY="..."
+export LLM_MODEL="..."
+uv run evaluate-jev --backend all
+```
+
+`--backend jev` e `--backend llm` rodam um lado só. Sem a chave o comando sai com código 2, antes de abrir a rede. Se alguma linha fica com `error` (transporte ou tipo inválido), o processo sai com código 1. Casamento falso não derruba o comando: é o dado da comparação. `--bins` muda quantas faixas a curva usa; o default é 10.
 
 Chamada ao vivo, fora da CI, com a chave só no ambiente:
 
@@ -142,11 +165,13 @@ Cada linha é um objeto JSON com: `task_id`, `source`, `backend`, `requested_mod
 
 `model` é o id que a resposta declara. No Jev ele pode diferir do alias pedido. Sem resposta, fica nulo. `error` guarda falha de rede, HTTP, schema ou tipo trocado, e a decisão ainda é copiada quando o JSON era válido mas não batia com a pergunta.
 
+`evaluate-jev` imprime um objeto com `items` e `metrics`, não a lista crua do runner. Em cada item, `predicted_decision` e `expected_decision` usam o formato do gabarito (`choice`, `score_level` ou `noul`). `matched` e `schema_valid` ficam nulos quando não há decisão comparável. `metrics` separa backend, tipo de pergunta e a fatia `expectation`. `low_confidence_mean_is_lower` só fica verdadeiro quando a média de `confidence` na fatia ambígua é menor do que na fatia `clear`, em respostas válidas. Noul não entra nessa média.
+
 ## Roadmap
 
-- study-PR3: harness de avaliação e métricas de calibração. Validade de schema, concordância com o gabarito e calibração da confiança declarada. A marca `low_confidence` entra como desenho do item; a curva em si não é calculada aqui.
+- study-PR3: entregue. Harness offline sobre o gabarito v1, concordância com o rótulo, validade de tipo e curva de calibração. A marca `low_confidence` é uma fatia do desenho do item. O comando não publica número de modelo.
 - study-PR4: experimentos ao vivo nos dois backends e o relatório. Números de qualidade, latência e custo só depois dessa rodada, com a configuração e o id do modelo gravados.
 
 ## Ainda fora
 
-Não há acurácia, curva de calibração, latência de produção nem custo medido. O eco local não substitui essas rodadas. Imagem e o header de visão ficam de fora do gabarito v1, embora o cliente HTTP envie o header se alguém passar `assets` ou uma pergunta Box.
+Não há acurácia publicada, curva de calibração de um modelo, latência de produção nem custo medido. O harness calcula essas contas em cima das decisões que receber; o eco local não substitui a rodada do study-PR4. Imagem e o header de visão ficam de fora do gabarito v1, embora o cliente HTTP envie o header se alguém passar `assets` ou uma pergunta Box.
